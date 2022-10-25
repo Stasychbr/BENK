@@ -3,7 +3,7 @@ import numpy as np
 import time
 from collections import defaultdict
 import pickle
-from BENK import TNWDataGenerator, TNW, train_model, device, make_spec_set, make_train_set, tau_loss
+from BENK import TNWDataGenerator, TNW, train_model, device, make_spec_set, tau_loss
 from learners import TValLearner, SValLearner, XValLearner
 from models import NWSurv, MyCox, MySurvForest
 from funcs import log_func, pow_func, spiral_func
@@ -31,16 +31,13 @@ def tau_cate_diff(S_diff, T, T_1, T_0):
         T_start = T[:, 0]
     integral = T_start + np.sum(S_diff[:, :-1] * T_diff, axis=-1)
     return np.sqrt(np.mean((integral - (T_1.ravel() - T_0.ravel())) ** 2))
-    
-def weibull_distr(x, b, l, u, nu):
-    return np.power(-np.log(u) / (l * np.exp(b * x)), 1 / nu)
 
 def get_data_from_param_func(func, t, noise_percent, censored_part=0.6, treat = True):
     x = func.calc_x(t)
     if treat:
-        T = np.float32(weibull_distr(t, b_trt, l_trt, u_trt, nu_trt))
+        T = np.float32(func.calc_y(t))
     else:
-        T = np.float32(weibull_distr(t, b_cnt, l_cnt, u_cnt, nu_cnt))
+        T = np.float32(func.calc_y(t))
     sigma = np.mean(T) * noise_percent / 3
     T += np.random.normal(0, sigma, t.shape[0])
     T[T > 2000] = 2000
@@ -73,8 +70,6 @@ def rmse(x, y):
     return np.sqrt(np.mean((x.ravel() - y.ravel()) ** 2))
 
 def exp_iter(data_dict):
-    np.random.seed(seed)
-    torch.manual_seed(seed)
     x_cnt, T_cnt, delta_cnt = data_dict['x_cnt'], data_dict['T_cnt'], data_dict['delta_cnt']
     x_trt, T_trt, delta_trt = data_dict['x_trt'], data_dict['T_trt'], data_dict['delta_trt']
     x_test, T_test_cnt, T_test_trt, delta_test = data_dict['x_test'], data_dict['T_test_cnt'], data_dict['T_test_trt'], data_dict['delta_test']
@@ -166,46 +161,50 @@ def table_exp(cnt_func, trt_func, noise_perc, t_bnds, censored_part, cnt_size, t
     data_dict = make_treat_set(cnt_func, trt_func, noise_perc, t_bnds, censored_part, cnt_size, trt_size, test_size, val_size)
     exp_iter(data_dict)
 
+
+res_dict = defaultdict(list)
+test_size = 1000
+cnt_size = 200
+val_part = 0.5
+val_size = int(val_part * cnt_size)
+censored_part = 0.33
+trt_part = 0.2
+trt_size = int(trt_part * cnt_size)
+batch_size = 128
+epochs = 1000
+patience = 10
+m = 10
+b_cnt = 0.5
+b_trt = 0.15
+nu_cnt = 1
+nu_trt = 1
+u_cnt = 0.02
+u_trt = 0.3
+l_cnt = 0.1
+l_trt = 0.1
+n = trt_size
+mlp_coef = 3
+t_bnds = (0, 10)
+noise_perc = 0.0
+size_list = [100, 200, 300, 500, 1000]
+trt_list = [0.1, 0.2, 0.3, 0.4, 0.5]
+cens_list = [0.1, 0.2, 0.3, 0.4, 0.5]
+noise_list = [0, 0.05, 0.1, 0.15]
+
+
 if __name__ == '__main__':
     time_stamp = time.time()
     seed = 123
     np.random.seed(seed)
+    torch.manual_seed(seed)
     try:
         ser_name = 'table0'
-        res_dict = defaultdict(list)
-        test_size = 1000
-        cnt_size = 200
-        val_part = 0.5
-        val_size = int(val_part * cnt_size)
-        censored_part = 0.25
-        trt_part = 0.2
-        trt_size = int(trt_part * cnt_size)
-        batch_size = 128
-        epochs = 1000
-        patience = 10
-        m = 10
-        b_cnt = 0.5
-        b_trt = 0.15
-        nu_cnt = 1
-        nu_trt = 1
-        u_cnt = 0.02
-        u_trt = 0.3
-        l_cnt = 0.1
-        l_trt = 0.1
-        n = trt_size
-        mlp_coef = 3
-        t_bnds = (0, 10)
-        noise_perc = 0.0
-        trt_func = spiral_func(m)
-        cnt_func = spiral_func(m)
-        # cnt_func = pow_func(m)
-        # trt_func = pow_func(m)
-        # cnt_func = log_func(m, (-4, -1), (1, 4))
-        # trt_func = log_func(m, (-4, -1), (1, 4))
-        size_list = [100, 200, 300, 500, 1000]
-        trt_list = [0.1, 0.2, 0.3, 0.4, 0.5]
-        cens_list = [0.1, 0.2, 0.3, 0.4, 0.5]
-        noise_list = [0, 0.05, 0.1, 0.15]
+        cnt_func = spiral_func(m, b_cnt, l_cnt, u_cnt, nu_cnt)
+        trt_func = spiral_func(m, b_trt, l_trt, u_trt, nu_trt)
+        # cnt_func = pow_func(m, b_cnt, l_cnt, u_cnt, nu_cnt)
+        # trt_func = pow_func(m, b_trt, l_trt, u_trt, nu_trt)
+        # cnt_func = log_func(m, (-4, -1), (1, 4), b_cnt, l_cnt, u_cnt, nu_cnt)
+        # trt_func = log_func(m, (-4, -1), (1, 4), b_trt, l_trt, u_trt, nu_trt)
         # size_exp(cnt_func, trt_func, noise_perc, t_bnds, censored_part, trt_part, test_size, val_part, size_list)
         # part_exp(cnt_func, trt_func, noise_perc, t_bnds, censored_part, cnt_size, trt_list, test_size, val_part)
         # cens_exp(cnt_func, trt_func, noise_perc, t_bnds, cens_list, cnt_size, trt_part, test_size, val_part)

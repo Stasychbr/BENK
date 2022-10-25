@@ -8,7 +8,6 @@ import pandas as pd
 def sf_to_t(S, T):
     t_diff = T[1:] - T[:-1]
     integral = S[:, :-1] * t_diff[None, :]
-    # assert(integral.ndim == 1 or integral.ndim == 2 and integral.shape[1] == 1)
     return T[0] + np.sum(integral, axis=-1)
 
 class NWSurv():
@@ -67,8 +66,6 @@ class NWSurv():
 
 class MyCox():
     def __init__(self, alpha):
-        # self.cox = CoxPHSurvivalAnalysis(n_iter=200)
-        # self.n_iter = 200
         self.pen_list = alpha
         self.penalizer = None
         self.val_df = None
@@ -145,7 +142,6 @@ class MySurvForest():
                     self.max_depth = max_depth
                     self.min_samples_leaf = min_samples_leaf
         else:
-            # print('No validation set was provided!')
             self.forest = RandomSurvivalForest()
             self.forest.fit(x, str_array)
     
