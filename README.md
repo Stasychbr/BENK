@@ -1,5 +1,5 @@
 # BENK method
-This repository contains the code base for "The Beran Estimator with Neural Kernels for Estimating the Heterogeneous Treatment Effect" article. The program is written in python 3 using the Pytorch framework.
+This repository contains the code base for ["The Beran Estimator with Neural Kernels for Estimating the Heterogeneous Treatment Effect"](https://arxiv.org/abs/2211.10793) article. The program is written in python 3 using the Pytorch framework.
 
 To satisfy the dependencies use pip and requirements.txt:
 
