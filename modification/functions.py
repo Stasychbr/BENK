@@ -62,7 +62,7 @@ class StepFunction:
         x = numpy.atleast_1d(x)
         if not numpy.isfinite(x).all():
             raise ValueError("x must be finite")
-        # basdarts
+        # original code
         # if numpy.min(x) < self.x[0] or numpy.max(x) > self.x[-1]:
         #     raise ValueError(
         #         "x must be within [%f; %f]" % (self.x[0], self.x[-1]))
