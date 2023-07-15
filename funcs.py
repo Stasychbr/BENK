@@ -1,72 +1,70 @@
+from abc import ABC
 import numpy as np
+from math import gamma
 
-def response_func(x, b, l, u, nu):
-    return np.power(-np.log(u) / (l * np.exp(b * x)), 1 / nu)
+class func(ABC):
+    def __init__(self, b, l, nu) -> None:
+        super().__init__()
+        self.b, self.l, self.nu = b, l, nu
+        self.gamma = gamma(1 / nu + 1)
+        
+    def calc_T(self, tau):
+        return np.power(
+            -np.log(np.random.uniform(0, 1, tau.shape[0])) / 
+            (self.l * np.exp(self.b * tau)), 1 / self.nu)
+        
+    def calc_expected(self, tau):
+        return np.power(self.l * np.exp(self.b * tau), -1 / self.nu) * self.gamma
 
-class pow_func():
-    def __init__(self, m, b, l, u, nu) -> None:
+class circle_func(func):
+    def __init__(self, m, t_bnd, b, l, nu) -> None:
+        assert m % 2 == 0
+        super().__init__(b, l, nu)
         self.m = m
-        self.b = b
-        self.l = l
-        self.u = u
-        self.nu = nu
+        circles_n = m // 2
+        t_range = t_bnd[1] - t_bnd[0]
+        self.split = [(i + 1) * t_range / circles_n for i in range(circles_n)]
+        self.split[-1] = t_bnd[1]
     
-    def calc_x(self, t):
-        a = 1 / np.sqrt(self.m)
-        pows = [a * (i + 1) for i in range(self.m)]
-        X = np.empty((t.shape[0], self.m))
-        for i, p in enumerate(pows):
-            if 0.8 < p < 1.6:
-                X[:, i] = np.random.normal(0, 1, t.shape[0])
-            else:
-                X[:, i] = np.power(t, a * (i + 1))
+    def calc_x(self, tau):
+        X = np.empty((tau.shape[0], self.m))
+        last_border = 0
+        for i, cur_border in enumerate(self.split):
+            cur_range = cur_border - last_border
+            scale = 2 * np.pi / cur_range
+            shift = -last_border
+            t_mask = np.logical_and(last_border < tau, tau < cur_border).astype(np.float32)
+            X[:, 2 * i] = np.sin((shift + tau) * scale) * t_mask
+            X[:, 2 * i + 1] = np.cos((shift + tau) * scale) * t_mask
+            last_border = cur_border
         return X
 
-    def calc_y(self, t):
-        return response_func(t, self.b, self.l, self.u, self.nu)
 
-
-class log_func():
-    def __init__(self, m, coeffs_neg, coeffs_pos, b, l, u, nu) -> None:
-        self.log_coeffs = np.empty(m)
+class gauss_func(func):
+    def __init__(self, m, t_bnd, b, l, nu) -> None:
+        super().__init__(b, l, nu)
         self.m = m
-        neg_num = m // 2
-        self.log_coeffs[:neg_num] = np.random.uniform(coeffs_neg[0], coeffs_neg[1], neg_num)
-        pos_num = m - neg_num
-        self.log_coeffs[neg_num:neg_num + pos_num] = np.random.uniform(coeffs_pos[0], coeffs_pos[1], pos_num)
-        rng = np.random.default_rng()
-        rng.shuffle(self.log_coeffs)
-        self.b = b
-        self.l = l
-        self.u = u
-        self.nu = nu
+        self.sigma = (t_bnd[1] - t_bnd[0]) / (6 * m)
 
-    def calc_x(self, t):
-        res = np.empty((t.shape[0], self.m))
+    def calc_x(self, tau):
+        res = np.empty((tau.shape[0], self.m))
         for i in range(self.m):
-            res[:, i] = self.log_coeffs[i] * np.log(t)
+            res[:, i] = 1 / (self.sigma * np.sqrt(2 * np.pi)) * np.exp(- (tau - i) ** 2 / (2 * self.sigma ** 2))
         return res
 
-    def calc_y(self, t):
-        return response_func(t, self.b, self.l, self.u, self.nu)
 
-
-class spiral_func():
-    def __init__(self, m, b, l, u, nu):
+class spiral_func(func):
+    def __init__(self, m, b, l, nu):
+        super().__init__(b, l, nu)
         self.m = m
-        self.b = b
         self.l = l
-        self.u = u
         self.nu = nu
     
-    def calc_x(self, t):
-        X = np.empty((t.shape[0], self.m), dtype=np.float32)
+    def calc_x(self, tau):
+        X = np.empty((tau.shape[0], self.m), dtype=np.float32)
         for i in range(self.m):
             if i % 2 == 0:
-                X[:, i] = t * np.sin((i // 2 + 1) * t)
+                X[:, i] = tau * np.sin((i // 2 + 1) * tau)
             else:
-                X[:, i] = t * np.cos((i // 2 + 1) * t)
+                X[:, i] = tau * np.cos((i // 2 + 1) * tau)
         return X
-
-    def calc_y(self, t):
-        return response_func(t, self.b, self.l, self.u, self.nu)

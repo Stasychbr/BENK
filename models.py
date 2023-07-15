@@ -1,166 +1,122 @@
 import numpy as np
-from lifelines import CoxPHFitter
+from sksurv.linear_model import CoxnetSurvivalAnalysis
 from sksurv.ensemble import RandomSurvivalForest
 from sklearn.metrics.pairwise import rbf_kernel
-from itertools import product
-import pandas as pd
+from numba import jit, float32, int64
+import warnings
 
 def sf_to_t(S, T):
     t_diff = T[1:] - T[:-1]
     integral = S[:, :-1] * t_diff[None, :]
     return T[0] + np.sum(integral, axis=-1)
 
-class NWSurv():
-    def __init__(self, gamma):
-        self.gamma_list = gamma
-        self.gamma = None
+# W and T already sorted
+@jit(float32[:, ::1](float32[:, ::1], int64[::1]), nopython=True)
+def nw_helper_func(W, D):
+    k = W.shape[0]
+    n = W.shape[1]
+    S = np.empty((k, n), np.float32)
+    if D[0] == 1:
+        S[:, 0] = 1 - W[:, 0]
+    else:
+        S[:, 0] = 1
+    for i in range(1, n):
+        if D[i] == 0:
+            S[:, i] = 1 * S[:, i - 1]
+            continue
+        weight_sum = np.zeros(k, dtype=np.float32)
+        for j in range(i):
+            weight_sum += W[:, j]
+            # if weight_sum[j] >= 1:
+            #     weight_sum[j] = 1 - W[j, i]
+        cur_S = 1 - W[:, i] / (1 - weight_sum)
+        for j in range(k):
+            if not np.isfinite(cur_S[j]) or cur_S[j] < 0:
+                cur_S[j] = 1
+        S[:, i] = S[:, i - 1] * cur_S
+    return S
 
-    def predict(self, x, t):
-        n = self.x_train.shape[0]
-        W = rbf_kernel(x, self.x_train, gamma=self.gamma)
-        W = W / np.sum(W, axis=-1)[:, None]
-        S = 1
-        for i in range(n):
-            if self.delta[i] == 0:
-                continue
-            cur_S = 1 - W[:, i] / (1 - np.sum(W * (self.T[None, :] < self.T[i, None]), axis=1))
-            cur_S[np.logical_not(np.isfinite(cur_S))] = 0
-            cur_S = np.tile(cur_S[:, None], (1, t.shape[0]))
-            cur_S[np.tile((self.T[i] > t)[None, :], (x.shape[0], 1))] = 1
-            S *= cur_S
-        if np.any(np.logical_not(np.isreal(S))):
+class NWSurv():
+    # random state is only for the interface consistency
+    def __init__(self, gamma=None, random_state=None):
+        self.gamma = 1 if gamma is None else gamma
+
+    def predict(self, x):
+        np.seterr(invalid='ignore', divide='ignore')
+        W = rbf_kernel(x.astype(np.float64), self.x_train.astype(np.float64), gamma=self.gamma)
+        W = W / np.sum(W, axis=-1, keepdims=True)
+        W[np.any(np.logical_not(np.isfinite(W)), axis=-1), :] = 1 / self.x_train.shape[0]
+        S = nw_helper_func(W.astype(np.float32), self.delta)
+        if np.any(np.logical_not(np.isfinite(S))):
             raise ValueError('nan or inf in S')
-        return sf_to_t(S, t)
+        return sf_to_t(S, self.T)
         
-    def fit(self, x, t, delta):
-        assert(t.shape[0] == delta.shape[0])
-        self.x_train = x
-        self.T = np.sort(t)
-        self.delta = delta
-        if self.gamma is not None:
-            return self
-        if all(map(lambda o: o is not None, (self.val_x, self.val_T, self.val_delta))):
-            min_loss = float('inf')
-            for g in self.gamma_list:
-                self.gamma = g
-                pred = self.predict(self.val_x, self.T)
-                cur_loss = np.mean((pred - self.val_T) ** 2)
-                if cur_loss <= min_loss:
-                    min_loss = cur_loss
-                    best_gamma = g
-            self.gamma = best_gamma
-        else:
-            self.gamma = 1
+    def fit(self, x, y):
+        self.T = y['time']
+        sort_args = np.argsort(self.T)
+        self.T = self.T[sort_args]
+        self.x_train = x[sort_args]
+        self.delta = y['censor'].astype(np.int64)[sort_args]
         return self
     
-    def set_val(self, val_x, val_t, val_delta):
-        self.val_x = val_x
-        self.val_T = val_t
-        self.val_delta = val_delta
-    
-    def get_params(self):
+    def get_params(self, deep=False):
         return {'gamma': self.gamma}
     
-    def set_params(self, params):
-        self.gamma = params['gamma']
-
-class MyCox():
-    def __init__(self, alpha):
-        self.pen_list = alpha
-        self.penalizer = None
-        self.val_df = None
-        self.params = None
-    
-    def fit(self, x, t, delta):
-        assert(t.shape[0] == delta.shape[0])
-        df_fit = pd.DataFrame(x)
-        df_fit = df_fit.assign(**{'event': delta.astype(int), 'time': t})
-        if self.params is not None:
-            self.cox = CoxPHFitter(**self.params)
-            self.cox.fit(df_fit, 'time', 'event')
-            return self
-        if self.val_df is not None:
-            max_C_ind = 0
-            for c in self.pen_list:
-                cox = CoxPHFitter(penalizer=c)
-                cox.fit(df_fit, 'time', 'event')
-                cur_C_ind = cox.score(self.val_df,  'concordance_index')
-                if cur_C_ind >= max_C_ind:
-                    max_C_ind = cur_C_ind
-                    self.cox = cox
-                    self.penalizer = c
-        else:
-            self.cox = CoxPHFitter()
-            self.cox.fit(df_fit, 'time', 'event')
+    def set_params(self, gamma):
+        self.gamma = gamma
         return self
 
-    def get_params(self):
-        return {'penalizer': self.penalizer}
+class MyCox(CoxnetSurvivalAnalysis):
+    # random state is only for the interface consistency
+    def __init__(self, *, n_alphas=1, alphas=None, alpha_min_ratio="auto", l1_ratio=0.75, penalty_factor=None,
+                 normalize=False, copy_X=True, tol=1e-5, max_iter=100000, verbose=False, fit_baseline_model=True,
+                 random_state=None):
+        self.random_state = random_state
+        super().__init__(n_alphas=n_alphas, alphas=alphas, alpha_min_ratio=alpha_min_ratio, l1_ratio=l1_ratio, penalty_factor=penalty_factor, 
+                         normalize=normalize, copy_X=copy_X, tol=tol, max_iter=max_iter, verbose=verbose, fit_baseline_model=fit_baseline_model)
     
-    def set_params(self, params):
-        self.params = params
-
-    def set_val(self, val_x, val_t, val_delta):
-        val_df = pd.DataFrame(val_x)
-        self.val_df = val_df.assign(**{'event': val_delta.astype(int), 'time': val_t})
-
-    def predict(self, x, t):
-        # sf_frame = self.cox.predict_survival_function(x, t)
-        # res = [sf(t) for sf in sf_list]
-        return self.cox.predict_expectation(x).to_numpy()
-
-class MySurvForest():
-    def __init__(self, trees, depth, leaf_samples, max_features = None):
-        self.trees = trees
-        self.depth = depth
-        self.leaf_samples = leaf_samples
-        self.max_features = max_features
-        self.val_x = None
-        self.val_str_array = None
-        self.params = None
-        self.n_jobs = 8
-    
-    def fit(self, x, t, delta):
-        assert(t.shape[0] == delta.shape[0])
-        str_array = np.ndarray(shape=(t.shape[0]), dtype=[('censor', '?'), ('time', 'f4')])
-        str_array['censor'] = delta.astype(bool)
-        str_array['time'] = t
-        if self.params is not None:
-            self.forest = RandomSurvivalForest(**self.params)
-            self.forest.fit(x, str_array)
-            return self
-        if self.val_x is not None and self.val_str_array is not None:
-            max_C_ind = 0
-            for n_estimators, max_depth, min_samples_leaf in product(self.trees, self.depth, self.leaf_samples):
-                forest = RandomSurvivalForest(n_estimators=n_estimators, max_depth=max_depth, min_samples_leaf=min_samples_leaf, max_features=self.max_features, n_jobs=self.n_jobs)
-                forest.fit(x, str_array)
-                cur_C_ind = forest.score(self.val_x, self.val_str_array)
-                if cur_C_ind >= max_C_ind:
-                    max_C_ind = cur_C_ind
-                    self.forest = forest
-                    self.n_estims = n_estimators
-                    self.max_depth = max_depth
-                    self.min_samples_leaf = min_samples_leaf
-        else:
-            self.forest = RandomSurvivalForest()
-            self.forest.fit(x, str_array)
-    
-        self.forest.fit(x, str_array)
+    def fit(self, x, y):
+        # clip is needed because of the domain requirements
+        # in the underlying step function
+        self.T = np.sort(np.clip(y['time'], 0, None))
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')
+            super().fit(x, y)
+        # print(self.alphas_)
         return self
 
-    def get_params(self):
-        return {'n_estimators': self.n_estims, 'max_depth': self.max_depth, 'min_samples_leaf': self.min_samples_leaf, 'max_features': self.max_features, 'n_jobs': self.n_jobs}
+    def predict(self, x):
+        t = self.T
+        baseline_model = self._get_baseline_model(None)
+        sf_list = self._predict_survival_function(baseline_model, super().predict(x), False)
+        res = np.empty((x.shape[0], t.shape[0]))
+        for i, sf in enumerate(sf_list):
+            domain = sf.domain
+            if domain[1] <= domain[0]:
+                # do not be surprised
+                res[i] = 0
+            else:
+                cur_t = np.clip(t, *domain)
+                res[i] = np.clip(sf(cur_t), 0, 1000)
+        return sf_to_t(res, t)
+
+class MySurvForest(RandomSurvivalForest):
     
-    def set_params(self, params):
-        self.params = params
+    def fit(self, x, y):
+        self.T = np.sort(y['time'])
+        super().fit(x, y)
+        return self
 
-    def set_val(self, val_x, val_t, val_delta):
-        self.val_x = val_x
-        self.val_str_array = np.ndarray(shape=(val_t.shape[0]), dtype=[('censor', '?'), ('time', 'f4')])
-        self.val_str_array['censor'] = val_delta.astype(bool)
-        self.val_str_array['time'] = val_t
-
-    def predict(self, x, t):
-        sf_list = self.forest.predict_survival_function(x)
-        res = [sf(t) for sf in sf_list]
-        return sf_to_t(np.array(res), t)
+    def predict(self, x):
+        t = self.T
+        sf_list = super().predict_survival_function(x)
+        res = np.empty((x.shape[0], t.shape[0]))
+        for i, sf in enumerate(sf_list):
+            domain = sf.domain
+            if domain[1] <= domain[0]:
+                # do not be surprised
+                res[i] = 0
+            else:
+                cur_t = np.clip(t, *domain)
+                res[i] = sf(cur_t)
+        return sf_to_t(res, t)

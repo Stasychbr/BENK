@@ -18,16 +18,18 @@ class Kernel(Module):
         s = int(np.sqrt(m))
         self.sparse = torch.nn.Sequential(
             torch.nn.Linear(m, 2 * m),
-            torch.nn.ReLU()
+            torch.nn.ReLU6()
         )
         self.sequent = torch.nn.Sequential(
+            # torch.nn.Linear(4 * m, 2 * m),
+            # torch.nn.ReLU(),
             torch.nn.Linear(2 * m, m),
-            torch.nn.Tanh(),
+            torch.nn.ReLU6(),
             torch.nn.Linear(m, 2 * s),
+            torch.nn.ReLU6(),
+            torch.nn.Linear(2 * s, 4),
             torch.nn.Tanh(),
-            torch.nn.Linear(2 * s, s),
-            torch.nn.Tanh(),
-            torch.nn.Linear(s, 1),
+            torch.nn.Linear(4, 1),
             torch.nn.Softplus()
         )
     
@@ -44,44 +46,43 @@ class TNW(Module):
 
     def forward(self, x_in, T_in, delta_in, x_p):
         n = x_in.shape[1]
-
-        W = []
-        for i in range(n):
-            W.append(self.kernel(x_in[:, i, :], x_p)[:, 0])
-        W = torch.stack(W, dim=1)
+        x_p_repeat = x_p[:, None, :].repeat(1, n, 1)
+        W = torch.reshape(self.kernel(x_in, x_p_repeat), (-1, n))
         W = W / torch.sum(W, dim=1, keepdim=True)
-
-        sorted_args = torch.argsort(T_in, 1)
+        sorted_T, sorted_args = torch.sort(T_in, 1)
         delta_sorted = torch.gather(delta_in, 1, sorted_args)
         W = torch.gather(W, 1, sorted_args)
-        sorted_T = torch.gather(T_in, 1, sorted_args)
-        cur_S = 1 - W[:, 0]
-        cur_S[delta_sorted[:, 0] == 0] = 1
-        S = [cur_S]
-        for i in range(1, n):
-            cur_S = 1 - W[:, i] / (1 - torch.sum(W[:, :i], dim=1))
-            cur_S[torch.isinf(cur_S)] = 0
-            cur_S[delta_sorted[:, i] == 0] = 1
-            S.append(S[-1] * cur_S)
-        S = torch.stack(S, 1)
-        if torch.any(torch.logical_not(torch.isfinite(S))):
-            raise ValueError('nan or inf in SF')
-        output = torch.stack((S, sorted_T), dim=2)
+        w_cumsum = torch.cumsum(W, dim=1)
+        shifted_w_cumsum = w_cumsum - W
+        ones = torch.ones_like(shifted_w_cumsum)
+        bad_idx = torch.isclose(shifted_w_cumsum, ones) | torch.isclose(w_cumsum, ones)
+        shifted_w_cumsum[bad_idx] = 0.0
+        w_cumsum[bad_idx] = 0.0
+
+        xi = torch.log(1.0 - shifted_w_cumsum)
+        xi -= torch.log(1.0 - w_cumsum) 
+
+        filtered_xi = delta_sorted * xi
+        hazards = torch.cumsum(filtered_xi, dim=1)
+        surv = torch.exp(-hazards)
+        output = torch.stack((surv, sorted_T), dim=2)
         return output
     
     def forward_in_points(self, x_in, T_in, delta_in, x_p, t_p):
         n = x_in.shape[1]
         k = t_p.shape[1]
 
-        W = []
-        for i in range(n):
-            W.append(self.kernel(x_in[:, i, :], x_p)[:, 0])
-        W = torch.stack(W, dim=1)
+        x_p_repeat = x_p[:, None, :].repeat(1, n, 1)
+        W = torch.reshape(self.kernel(x_in, x_p_repeat), (-1, n))
         W = W / torch.sum(W, dim=1, keepdim=True)
         S = 1
+        # eps = 10 ** -6
         for i in range(n):
-            cur_S = 1 - W[:, i] / (1 - torch.sum(W * (T_in < T_in[:, i, None]), dim=1))
-            cur_S[torch.isinf(cur_S)] = 0
+            weight_sum = torch.sum(W * (T_in < T_in[:, i, None]), dim=1)
+            bad_idx = weight_sum >= 1
+            weight_sum[bad_idx] = 0
+            cur_S = 1 - W[:, i] / (1 - weight_sum)
+            cur_S[bad_idx] = 0
             cur_S = cur_S[:, None].repeat(1, k)
             cur_S[(T_in[:, None, i] > t_p) | (delta_in[:, None, i] == 0)] = 1
             S *= cur_S
@@ -205,7 +206,10 @@ def train_model(data_generator, model, loss_fn, optimizer, epochs, val_data=None
             optimizer.zero_grad()
 
             pred = model(*data)
-            loss = loss_fn(pred, t_labels)
+            d_mask = (d_labels == 1).ravel()
+            if d_mask.max() == False:
+                continue
+            loss = loss_fn(pred[d_mask], t_labels[d_mask])
             
             loss.backward()
             
