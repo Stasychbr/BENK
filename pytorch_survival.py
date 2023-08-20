@@ -3,15 +3,15 @@ import numpy as np
 import time
 from collections import defaultdict
 import json
-from BENK import TNWDataGenerator, TNW, train_model, device, make_spec_set, tau_loss
+from BENK import BENKDataGenerator, BENK, train_model, device, make_spec_set, tau_loss
 from learners import make_t_learner, make_s_learner, make_x_learner
 from models import NWSurv, MyCox, MySurvForest
 from funcs import gauss_func, circle_func, spiral_func
 from sklearn.ensemble import RandomForestRegressor
 from sksurv.linear_model import CoxnetSurvivalAnalysis
-import pandas as pd
 
 np.seterr(all='ignore')
+
 
 def tau_metric(S, T, T_labels):
     assert S.ndim == 2
@@ -24,6 +24,7 @@ def tau_metric(S, T, T_labels):
     integral = T_0 + np.sum(S[:, :-1] * T_diff, axis=-1)
     return np.sqrt(np.mean((integral - T_labels.ravel()) ** 2))
 
+
 def tau_cate_diff(S_diff, T, T_1, T_0):
     # assert S_diff.ndim  == T_1.ndim == T_0.ndim == 2
     if T.ndim == 1:
@@ -35,6 +36,7 @@ def tau_cate_diff(S_diff, T, T_1, T_0):
     integral = T_start + np.sum(S_diff[:, :-1] * T_diff, axis=-1)
     return np.sqrt(np.mean((integral - (T_1.ravel() - T_0.ravel())) ** 2))
 
+
 def get_data_from_param_func(func, t, censored_part=0.6):
     x = func.calc_x(t)
     x = (x - x.mean(axis=0)[None, :]) / x.std(axis=0)[None, :]
@@ -44,6 +46,7 @@ def get_data_from_param_func(func, t, censored_part=0.6):
     T[T > 2000] = 2000
     delta = np.float32(np.random.binomial(1, 1 - censored_part, size=t.shape[0]))
     return x, T, delta
+
 
 def make_treat_set(cnt_func, trt_func, t_bounds, censored_part, cnt_size, trt_size, test_size, val_size):
     x_cnt = x_trt = x_test = x_val = float('nan')
@@ -71,6 +74,7 @@ def make_treat_set(cnt_func, trt_func, t_bounds, censored_part, cnt_size, trt_si
     res_dict['T_test_trt_exp'], res_dict['T_test_cnt_exp'] = T_test_trt_exp, T_test_cnt_exp
     return res_dict
 
+
 def arrs_to_torch_dev(*args):
     return [torch.from_numpy(a).to(device) for a in args]
 
@@ -78,40 +82,49 @@ def arrs_to_torch_dev(*args):
 def rmse(x, y):
     return np.sqrt(np.mean((x.ravel() - y.ravel()) ** 2))
 
+
 def exp_iter(data_dict, do_cv=True, models_params=None):
     x_cnt, T_cnt, delta_cnt = data_dict['x_cnt'], data_dict['T_cnt'], data_dict['delta_cnt']
     x_trt, T_trt, delta_trt = data_dict['x_trt'], data_dict['T_trt'], data_dict['delta_trt']
-    x_test, T_test_cnt, T_test_trt, delta_test = data_dict['x_test'], data_dict['T_test_cnt'], data_dict['T_test_trt'], data_dict['delta_test']
+    x_test, T_test_cnt, T_test_trt, delta_test = data_dict['x_test'], data_dict[
+        'T_test_cnt'], data_dict['T_test_trt'], data_dict['delta_test']
     x_val, T_val, delta_val = data_dict['x_val'], data_dict['T_val'], data_dict['delta_val']
     T_test_trt_exp, T_test_cnt_exp = data_dict['T_test_trt_exp'], data_dict['T_test_cnt_exp']
-    model = TNW(m).to(device)
-    data_gen = TNWDataGenerator(x_cnt, T_cnt, delta_cnt, batch_size, n, mlp_coef)
-    x_in_t_c, cnt_times, delta_in_t_c, x_p_t_c, cnt_labels, cnt_d = make_spec_set(x_cnt, x_test, T_cnt, T_test_cnt, delta_cnt, delta_test, x_cnt.shape[0], m, 1)
-    x_in_t_c, T_in_t_c, delta_in_t_c, x_p_t_c = arrs_to_torch_dev(x_in_t_c, cnt_times, delta_in_t_c, x_p_t_c)
-    x_in_t_t, T_in_t_t, delta_in_t_t, x_p_t_t, trt_labels, trt_d = make_spec_set(x_trt, x_test, T_trt, T_test_trt, delta_trt, delta_test, x_trt.shape[0], m, 1)
-    x_in_t_t, T_in_t_t, delta_in_t_t, x_p_t_t = arrs_to_torch_dev(x_in_t_t, T_in_t_t, delta_in_t_t, x_p_t_t)
+    model = BENK(m).to(device)
+    data_gen = BENKDataGenerator(x_cnt, T_cnt, delta_cnt, batch_size, n, mlp_coef)
+    x_in_t_c, cnt_times, delta_in_t_c, x_p_t_c, cnt_labels, cnt_d = make_spec_set(
+        x_cnt, x_test, T_cnt, T_test_cnt, delta_cnt, delta_test, x_cnt.shape[0], m, 1)
+    x_in_t_c, T_in_t_c, delta_in_t_c, x_p_t_c = arrs_to_torch_dev(
+        x_in_t_c, cnt_times, delta_in_t_c, x_p_t_c)
+    x_in_t_t, T_in_t_t, delta_in_t_t, x_p_t_t, trt_labels, trt_d = make_spec_set(
+        x_trt, x_test, T_trt, T_test_trt, delta_trt, delta_test, x_trt.shape[0], m, 1)
+    x_in_t_t, T_in_t_t, delta_in_t_t, x_p_t_t = arrs_to_torch_dev(
+        x_in_t_t, T_in_t_t, delta_in_t_t, x_p_t_t)
 
     predict_T = np.sort(np.concatenate((T_cnt, T_trt)))
     predict_T_torch = arrs_to_torch_dev(predict_T)[0][None, :].repeat(x_in_t_c.shape[0], 1)
+
     def calc_my_model_metrics(*keys):
         S_0 = model.predict_in_points(x_in_t_c, T_in_t_c, delta_in_t_c, x_p_t_c, predict_T_torch)
         res_dict[keys[0]].append(tau_metric(S_0, predict_T, cnt_labels))
         S_1 = model.predict_in_points(x_in_t_t, T_in_t_t, delta_in_t_t, x_p_t_t, predict_T_torch)
         res_dict[keys[1]].append(tau_metric(S_1, predict_T, trt_labels))
         res_dict[keys[2]].append(tau_cate_diff(S_1 - S_0, predict_T, trt_labels, cnt_labels))
-        
+
         res_dict[keys[3]].append(tau_metric(S_0, predict_T, T_test_cnt_exp))
         res_dict[keys[4]].append(tau_metric(S_1, predict_T, T_test_trt_exp))
         res_dict[keys[5]].append(tau_metric(S_1 - S_0, predict_T, T_test_trt_exp - T_test_cnt_exp))
-        
-    *val_data, val_labels, val_d = make_spec_set(x_cnt, x_val, T_cnt, T_val, delta_cnt, delta_val, x_cnt.shape[0], m, 1)
+
+    *val_data, val_labels, val_d = make_spec_set(x_cnt, x_val,
+                                                 T_cnt, T_val, delta_cnt, delta_val, x_cnt.shape[0], m, 1)
     *val_data, val_labels, val_d = arrs_to_torch_dev(*val_data, val_labels, val_d)
     optimizer = torch.optim.AdamW(model.parameters(), 0.001)
     # optimizer = torch.optim.Adagrad(model.parameters(), 0.01)
-    train_model(data_gen, model, tau_loss, optimizer, epochs, (val_data, val_labels, val_d), patience)
+    train_model(data_gen, model, tau_loss, optimizer, epochs,
+                (val_data, val_labels, val_d), patience)
     calc_my_model_metrics('Kernel control', 'Kernel treat', 'Kernel CATE',
                           'Kernel control PEHE', 'Kernel treat PEHE', 'Kernel CATE PEHE')
-    
+
     X = np.concatenate((x_cnt, x_trt), axis=0)
     T = np.concatenate((T_cnt, T_trt), axis=0)
     D = np.concatenate((delta_cnt, delta_trt), axis=0)
@@ -124,7 +137,7 @@ def exp_iter(data_dict, do_cv=True, models_params=None):
     Y_val['time'] = T_val
     t_train = np.concatenate((data_dict['t_cnt'], data_dict['t_trt']), axis=0)[:, None]
     t_test, t_val = data_dict['t_test'][:, None], data_dict['t_val'][:, None]
-    
+
     n_splits = 3
     if do_cv:
         t_sf_cv = s_sf_cv = x_sf_cv = reg_sf_cv = reg_nw_cv = reg_cox_cv = {
@@ -193,7 +206,7 @@ def exp_iter(data_dict, do_cv=True, models_params=None):
         print(f'{key} PEHE:', res_dict[f'{key} CATE PEHE'][-1])
     if do_cv:
         return params_dict
-    
+
 
 def size_exp(cnt_func, trt_func, t_bnds, censored_part, trt_part, test_size, val_part, size_list):
     global n
@@ -202,7 +215,8 @@ def size_exp(cnt_func, trt_func, t_bnds, censored_part, trt_part, test_size, val
         trt_size = int(trt_part * s)
         n = min(100, trt_size)
         val_size = int(val_part * s)
-        data_dict = make_treat_set(cnt_func, trt_func, t_bnds, censored_part, s, trt_size, test_size, val_size)
+        data_dict = make_treat_set(cnt_func, trt_func, t_bnds,
+                                   censored_part, s, trt_size, test_size, val_size)
         new_params = exp_iter(data_dict, do_cv, None if do_cv else models_params_list[i])
         if do_cv:
             models_params_list.append(new_params)
@@ -215,30 +229,35 @@ def part_exp(cnt_func, trt_func, t_bnds, censored_part, cnt_size, trt_parts, tes
     val_size = int(val_part * cnt_size)
     for i, trt_part in enumerate(trt_parts):
         trt_size = int(trt_part * cnt_size)
-        data_dict = make_treat_set(cnt_func, trt_func, t_bnds, censored_part, cnt_size, trt_size, test_size, val_size)
+        data_dict = make_treat_set(cnt_func, trt_func, t_bnds, censored_part,
+                                   cnt_size, trt_size, test_size, val_size)
         new_params = exp_iter(data_dict, do_cv, None if do_cv else models_params_list[i])
         if do_cv:
             models_params_list.append(new_params)
+
 
 def cens_exp(cnt_func, trt_func, t_bnds, censored_list, cnt_size, trt_part, test_size, val_part):
     global models_params_list
     for i, c in enumerate(censored_list):
-        data_dict = make_treat_set(cnt_func, trt_func, t_bnds, c, cnt_size, trt_size, test_size, val_size)
+        data_dict = make_treat_set(cnt_func, trt_func, t_bnds, c,
+                                   cnt_size, trt_size, test_size, val_size)
         new_params = exp_iter(data_dict, do_cv, None if do_cv else models_params_list[i])
         if do_cv:
             models_params_list.append(new_params)
 
+
 def table_exp(cnt_func, trt_func, t_bnds, censored_part, cnt_size, trt_part, test_size, val_part):
     global models_params_list
-    data_dict = make_treat_set(cnt_func, trt_func, t_bnds, censored_part, cnt_size, trt_size, test_size, val_size)
+    data_dict = make_treat_set(cnt_func, trt_func, t_bnds, censored_part,
+                               cnt_size, trt_size, test_size, val_size)
     new_params = exp_iter(data_dict, do_cv, None if do_cv else models_params_list[0])
     if do_cv:
         models_params_list.append(new_params)
 
 
-random_seed = 777
+random_seed = 12345
 test_size = 1000
-cnt_size =  300
+cnt_size = 300
 val_part = 0.5
 val_size = int(val_part * cnt_size)
 censored_part = 0.33
@@ -248,7 +267,7 @@ batch_size = 128
 epochs = 500
 patience = 10
 m = 10
-b_cnt = 1.6# (0.1, 1) and (1, 10)
+b_cnt = 1.6
 b_trt = 0.8
 nu_cnt = 2
 nu_trt = 2
@@ -256,70 +275,74 @@ l_cnt = 0.0005
 l_trt = 0.005
 n = trt_size
 mlp_coef = 3
-t_bnds = (0, 10) # (0, 10), (0, 5) and (0.5, 5)
+t_bnds = (0, 10)
 size_list = [100, 200, 300, 500, 1000]
 trt_list = [0.1, 0.2, 0.3, 0.4, 0.5, 0.75, 1.0]
 cens_list = [0.1, 0.2, 0.3, 0.4, 0.5]
 
-iter_num = 1
-cv_period = 10
+iter_num = 100
+cv_period = 5
+max_attempts = 5
+res_dict = None
 
 if __name__ == '__main__':
     time_stamp = time.time()
     np.random.seed(random_seed)
     torch.manual_seed(random_seed)
-    
+
     for i in range(iter_num):
-        res_dict = defaultdict(list)
-        do_cv = i % cv_period == 0
-        if do_cv:
-            models_params_list = []
-        try:
-            ser_name = f'test_{i}'
-            # cnt_func = spiral_func(m, b_cnt, l_cnt, nu_cnt)
-            # trt_func = spiral_func(m, b_trt, l_trt, nu_trt)
-            # cnt_func = circle_func(m, t_bnds, b_cnt, l_cnt, nu_cnt)
-            # trt_func = circle_func(m, t_bnds, b_trt, l_trt, nu_trt)
-            cnt_func = gauss_func(m, t_bnds, b_cnt, l_cnt, nu_cnt)
-            trt_func = gauss_func(m, t_bnds, b_trt, l_trt, nu_trt)
-            # size_exp(cnt_func, trt_func, t_bnds, censored_part, trt_part, test_size, val_part, size_list)
-            # part_exp(cnt_func, trt_func, t_bnds, censored_part, cnt_size, trt_list, test_size, val_part)
-            # cens_exp(cnt_func, trt_func, t_bnds, cens_list, cnt_size, trt_part, test_size, val_part)
-            table_exp(cnt_func, trt_func, t_bnds, censored_part, cnt_size, trt_part, test_size, val_part)
-            
-            
-        except KeyboardInterrupt:
-            pass
+        j = 0
+        succeeded = False
+        while j < max_attempts and not succeeded:
+            res_dict = defaultdict(list)
+            do_cv = i % cv_period == 0
+            if do_cv:
+                models_params_list = []
+            try:
+                ser_name = f'spiral_size_{i}'
+                cnt_func = spiral_func(m, b_cnt, l_cnt, nu_cnt)
+                trt_func = spiral_func(m, b_trt, l_trt, nu_trt)
+                # cnt_func = circle_func(m, t_bnds, b_cnt, l_cnt, nu_cnt)
+                # trt_func = circle_func(m, t_bnds, b_trt, l_trt, nu_trt)
+                # cnt_func = gauss_func(m, t_bnds, b_cnt, l_cnt, nu_cnt)
+                # trt_func = gauss_func(m, t_bnds, b_trt, l_trt, nu_trt)
+                size_exp(cnt_func, trt_func, t_bnds, censored_part,
+                         trt_part, test_size, val_part, size_list)
+                # part_exp(cnt_func, trt_func, t_bnds, censored_part, cnt_size, trt_list, test_size, val_part)
+                # cens_exp(cnt_func, trt_func, t_bnds, cens_list, cnt_size, trt_part, test_size, val_part)
+                # table_exp(cnt_func, trt_func, t_bnds, censored_part, cnt_size, trt_part, test_size, val_part)
 
-        # for key, val in res_dict.items():
-        #     print(f'{key}: {np.mean(val)}')
-        
-        
-        params = {
-            'batch_size': batch_size,
-            'epochs_num': epochs,
-            'mlp_coef': mlp_coef,
-            'patience': patience,
-            'm': m,
-            'n': n,
-            'control_sizes': size_list,
-            'control_size': cnt_size,
-            'treat_part': trt_part,
-            'treat_parts': trt_list,
-            'cens_parts': cens_list,
-            'test_size': test_size, 
-            'val_part': val_part,
-            't_bounds': t_bnds,
-            'l_cnt': l_cnt,
-            'l_trt': l_trt,
-        }
+            except ArithmeticError:
+                j += 1
+                continue
 
-        res_dict['params'] = params
-        # with open(f'surv_dicts/{ser_name}.pk', 'wb') as file:
-        #     pickle.dump(res_dict, file)
-        with open(f'surv_dicts/{ser_name}.json', 'w') as file:
-            f32_to_double = lambda x: x.item()
-            json.dump(res_dict, file, indent=1, default=f32_to_double)
+            # for key, val in res_dict.items():
+            #     print(f'{key}: {np.mean(val)}')
+
+            params = {
+                'batch_size': batch_size,
+                'epochs_num': epochs,
+                'mlp_coef': mlp_coef,
+                'patience': patience,
+                'm': m,
+                'n': n,
+                'control_sizes': size_list,
+                'control_size': cnt_size,
+                'treat_part': trt_part,
+                'treat_parts': trt_list,
+                'cens_parts': cens_list,
+                'test_size': test_size,
+                'val_part': val_part,
+                't_bounds': t_bnds,
+                'l_cnt': l_cnt,
+                'l_trt': l_trt,
+            }
+
+            res_dict['params'] = params
+            succeeded = True
+            with open(f'surv_dicts/{ser_name}.json', 'w') as file:
+                def f32_to_double(x): return x.item()
+                json.dump(res_dict, file, indent=1, default=f32_to_double)
 
 
-print('\ntime elapsed: ', round(time.time() - time_stamp, 0), ' s.')
+    print('\ntime elapsed: ', round(time.time() - time_stamp, 0), ' s.')

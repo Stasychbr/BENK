@@ -5,12 +5,15 @@ from sklearn.metrics.pairwise import rbf_kernel
 from numba import jit, float32, int64
 import warnings
 
+
 def sf_to_t(S, T):
     t_diff = T[1:] - T[:-1]
     integral = S[:, :-1] * t_diff[None, :]
     return T[0] + np.sum(integral, axis=-1)
 
 # W and T already sorted
+
+
 @jit(float32[:, ::1](float32[:, ::1], int64[::1]), nopython=True)
 def nw_helper_func(W, D):
     k = W.shape[0]
@@ -36,6 +39,7 @@ def nw_helper_func(W, D):
         S[:, i] = S[:, i - 1] * cur_S
     return S
 
+
 class NWSurv():
     # random state is only for the interface consistency
     def __init__(self, gamma=None, random_state=None):
@@ -50,7 +54,7 @@ class NWSurv():
         if np.any(np.logical_not(np.isfinite(S))):
             raise ValueError('nan or inf in S')
         return sf_to_t(S, self.T)
-        
+
     def fit(self, x, y):
         self.T = y['time']
         sort_args = np.argsort(self.T)
@@ -58,13 +62,14 @@ class NWSurv():
         self.x_train = x[sort_args]
         self.delta = y['censor'].astype(np.int64)[sort_args]
         return self
-    
+
     def get_params(self, deep=False):
         return {'gamma': self.gamma}
-    
+
     def set_params(self, gamma):
         self.gamma = gamma
         return self
+
 
 class MyCox(CoxnetSurvivalAnalysis):
     # random state is only for the interface consistency
@@ -72,13 +77,11 @@ class MyCox(CoxnetSurvivalAnalysis):
                  normalize=False, copy_X=True, tol=1e-5, max_iter=100000, verbose=False, fit_baseline_model=True,
                  random_state=None):
         self.random_state = random_state
-        super().__init__(n_alphas=n_alphas, alphas=alphas, alpha_min_ratio=alpha_min_ratio, l1_ratio=l1_ratio, penalty_factor=penalty_factor, 
+        super().__init__(n_alphas=n_alphas, alphas=alphas, alpha_min_ratio=alpha_min_ratio, l1_ratio=l1_ratio, penalty_factor=penalty_factor,
                          normalize=normalize, copy_X=copy_X, tol=tol, max_iter=max_iter, verbose=verbose, fit_baseline_model=fit_baseline_model)
-    
+
     def fit(self, x, y):
-        # clip is needed because of the domain requirements
-        # in the underlying step function
-        self.T = np.sort(np.clip(y['time'], 0, None))
+        self.T = np.sort(y['time'])
         with warnings.catch_warnings():
             warnings.simplefilter('ignore')
             super().fit(x, y)
@@ -92,16 +95,13 @@ class MyCox(CoxnetSurvivalAnalysis):
         res = np.empty((x.shape[0], t.shape[0]))
         for i, sf in enumerate(sf_list):
             domain = sf.domain
-            if domain[1] <= domain[0]:
-                # do not be surprised
-                res[i] = 0
-            else:
-                cur_t = np.clip(t, *domain)
-                res[i] = np.clip(sf(cur_t), 0, 1000)
+            cur_t = np.clip(t, *domain)
+            res[i] = np.clip(sf(cur_t), 0, 1000)
         return sf_to_t(res, t)
 
+
 class MySurvForest(RandomSurvivalForest):
-    
+
     def fit(self, x, y):
         self.T = np.sort(y['time'])
         super().fit(x, y)
@@ -113,10 +113,6 @@ class MySurvForest(RandomSurvivalForest):
         res = np.empty((x.shape[0], t.shape[0]))
         for i, sf in enumerate(sf_list):
             domain = sf.domain
-            if domain[1] <= domain[0]:
-                # do not be surprised
-                res[i] = 0
-            else:
-                cur_t = np.clip(t, *domain)
-                res[i] = sf(cur_t)
+            cur_t = np.clip(t, *domain)
+            res[i] = sf(cur_t)
         return sf_to_t(res, t)

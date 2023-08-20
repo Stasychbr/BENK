@@ -12,6 +12,7 @@ import copy
 # device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 device = torch.device('cpu')
 
+
 class Kernel(Module):
     def __init__(self, m) -> None:
         super().__init__()
@@ -32,14 +33,15 @@ class Kernel(Module):
             torch.nn.Linear(4, 1),
             torch.nn.Softplus()
         )
-    
+
     def forward(self, x_1, x_2):
         sparse_1 = self.sparse(x_1)
         sparse_2 = self.sparse(x_2)
         total_in = torch.abs(sparse_1 - sparse_2)
         return self.sequent(total_in)
 
-class TNW(Module):
+
+class BENK(Module):
     def __init__(self, m) -> None:
         super().__init__()
         self.kernel = Kernel(m)
@@ -60,14 +62,14 @@ class TNW(Module):
         w_cumsum[bad_idx] = 0.0
 
         xi = torch.log(1.0 - shifted_w_cumsum)
-        xi -= torch.log(1.0 - w_cumsum) 
+        xi -= torch.log(1.0 - w_cumsum)
 
         filtered_xi = delta_sorted * xi
         hazards = torch.cumsum(filtered_xi, dim=1)
         surv = torch.exp(-hazards)
         output = torch.stack((surv, sorted_T), dim=2)
         return output
-    
+
     def forward_in_points(self, x_in, T_in, delta_in, x_p, t_p):
         n = x_in.shape[1]
         k = t_p.shape[1]
@@ -100,26 +102,28 @@ class TNW(Module):
         with torch.no_grad():
             return self(*args).cpu().numpy()
 
-class TNW_dataset(Dataset):
+
+class BENKDataset(Dataset):
     def __init__(self, x_in, T_in, delta_in, x_p, t_p, d_p) -> None:
         super().__init__()
         args, _, _ = getargs(self.__init__.__code__)
         for arg in args[1:]:
             setattr(self, arg, torch.from_numpy(locals()[arg]).to(device))
-    
+
     def __getitem__(self, index):
         return ((self.x_in[index], self.T_in[index], self.delta_in[index], self.x_p[index]), self.t_p[index], self.d_p[index])
-    
+
     def __len__(self):
         return self.x_in.shape[0]
-    
+
+
 @numba.njit
 def make_spec_set(x_in, x_p, T_in, T_p, delta_in, delta_p, n, m, mlp_coef):
     idx = np.arange(x_in.shape[0])
     x_in_out = np.zeros((x_p.shape[0], mlp_coef, n, m), dtype=np.float32)
     T_in_out = np.zeros((x_p.shape[0], mlp_coef, n), dtype=np.float32)
     x_p_out = np.zeros((x_p.shape[0], mlp_coef, m), dtype=np.float32)
-    t_p_out = np.zeros((x_p.shape[0], mlp_coef), dtype=np.float32) 
+    t_p_out = np.zeros((x_p.shape[0], mlp_coef), dtype=np.float32)
     labels = np.zeros((x_p.shape[0], mlp_coef), dtype=np.float32)
     delta_in_out = np.zeros((x_p.shape[0], mlp_coef, n), dtype=np.float32)
     for i in range(x_p.shape[0]):
@@ -145,6 +149,7 @@ def make_spec_set(x_in, x_p, T_in, T_p, delta_in, delta_p, n, m, mlp_coef):
     delta_in_out = np.reshape(delta_in_out, (-1, n))
     labels = np.reshape(labels, (-1, 1))
     return x_in_out, T_in_out, delta_in_out, x_p_out, t_p_out, labels
+
 
 @numba.njit
 def make_train_set(x, T, delta, n, m, mlp_coef):
@@ -179,19 +184,20 @@ def make_train_set(x, T, delta, n, m, mlp_coef):
     delta_labels = np.reshape(delta_labels, (-1, 1))
     return x_in, T_in, delta_in, x_p, t_p, delta_labels
 
+
 def train_model(data_generator, model, loss_fn, optimizer, epochs, val_data=None, patience=0):
     # writer = SummaryWriter('./TB_log/' + time.strftime("%d.%m_%H.%M.%S"))
     start_time = time.time()
     if val_data is not None:
         weights = copy.deepcopy(model.state_dict())
         cur_patience = 0
-    
+
         def get_val_loss():
             with torch.no_grad():
                 val_pred = model(*val_data[0])
                 val_loss = loss_fn(val_pred, val_data[1]).item()
             return val_loss
-    
+
         best_val_loss = get_val_loss()
 
     model.train()
@@ -210,16 +216,16 @@ def train_model(data_generator, model, loss_fn, optimizer, epochs, val_data=None
             if d_mask.max() == False:
                 continue
             loss = loss_fn(pred[d_mask], t_labels[d_mask])
-            
+
             loss.backward()
-            
+
             for p in model.parameters():
                 p.grad[torch.logical_not(torch.isfinite(p.grad))] = 0
             optimizer.step()
 
             cur_loss += loss.item()
             i += 1
-            
+
             print(f'Loss: {round(cur_loss / i, 5)}, step {i}/{steps}', end='        \r')
 
         print()
@@ -241,6 +247,7 @@ def train_model(data_generator, model, loss_fn, optimizer, epochs, val_data=None
         print('time elapsed: ', round(time.time() - time_stamp, 4), ' sec.')
     print(f'Train is finished, {round(time.time() - start_time, 0)} sec. taken')
 
+
 def tau_loss(S, T_labels):
     SF = S[..., 0]
     T = S[..., 1]
@@ -248,14 +255,16 @@ def tau_loss(S, T_labels):
     integral = T[:, 0, None] + torch.sum(SF[:, :-1] * T_diff, dim=-1, keepdim=True)
     return F.mse_loss(integral, T_labels)
 
-class TNWDataGenerator():
+
+class BENKDataGenerator():
     def __init__(self, x, T, delta, batch, n, mlp_coef, f_shuffle=False) -> None:
         self.x, self.T, self.delta = x, T, delta
         self.n = n
         self.mlp_coef = mlp_coef
         self.batch = batch
         self.f_shuffle = f_shuffle
-        
+
     def get_data_loader(self):
-        *data, labels, delta_labels = make_train_set(self.x, self.T, self.delta, self.n, self.x.shape[1], self.mlp_coef)
-        return DataLoader(TNW_dataset(*data, labels, delta_labels), self.batch, shuffle=self.f_shuffle)
+        *data, labels, delta_labels = make_train_set(self.x, self.T,
+                                                     self.delta, self.n, self.x.shape[1], self.mlp_coef)
+        return DataLoader(BENKDataset(*data, labels, delta_labels), self.batch, shuffle=self.f_shuffle)

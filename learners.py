@@ -5,6 +5,7 @@ from numpy.lib import recfunctions as rfn
 
 N_JOBS = 6
 
+
 def cens_scorer(Y_true, T_pred):
     T = Y_true['time']
     D = Y_true['censor']
@@ -12,7 +13,7 @@ def cens_scorer(Y_true, T_pred):
     if np.max(uncens_idx) == False:
         return float('inf')
     return np.mean((T[uncens_idx] - T_pred[uncens_idx]) ** 2)
-    
+
 
 class TValLearner():
     def __init__(self, estimator1, estimator2, val_set_c, val_labels_c, val_set_t, val_labels_t, cv_grid, n_splits, random_state=None, do_cv=True) -> None:
@@ -36,7 +37,7 @@ class TValLearner():
         Y_train_control = rfn.stack_arrays((Y_train_control, self.val_labels_c), usemask=False)
         if self.do_cv:
             grid_search = RandomizedSearchCV(self.estim_control, self.cv_grid,
-                                    scoring=self.scorer, refit=True, cv=self.cv_strat, n_jobs=N_JOBS)
+                                             scoring=self.scorer, refit=True, cv=self.cv_strat, n_jobs=N_JOBS)
             grid_search.fit(X_train_control, Y_train_control)
             self.estim_control = grid_search.best_estimator_
         else:
@@ -89,7 +90,7 @@ class SValLearner():
         Y_train = rfn.stack_arrays((Y, self.val_labels_c, self.val_labels_t), usemask=False)
         if self.do_cv:
             grid_search = RandomizedSearchCV(self.estim, self.cv_grid,
-                                    scoring=self.scorer, refit=True, cv=self.cv_strat, n_jobs=N_JOBS)
+                                             scoring=self.scorer, refit=True, cv=self.cv_strat, n_jobs=N_JOBS)
             grid_search.fit(X_train, Y_train)
             self.estim = grid_search.best_estimator_
         else:
@@ -153,7 +154,7 @@ class XValLearner():
 
         if self.do_cv:
             grid_search_base = RandomizedSearchCV(self.mu_0, self.cv_grid_base, scoring=self.scorer_base,
-                                    refit=True, cv=self.cv_strat_base, n_jobs=N_JOBS)
+                                                  refit=True, cv=self.cv_strat_base, n_jobs=N_JOBS)
             grid_search_base.fit(X_0, Y_0)
             self.mu_0 = grid_search_base.best_estimator_
         else:
@@ -169,7 +170,7 @@ class XValLearner():
 
         if self.do_cv:
             grid_search_reg = RandomizedSearchCV(self.tau_0, self.cv_grid_reg, scoring=self.scorer_reg,
-                                    refit=True, cv=self.cv_strat_reg, n_jobs=N_JOBS)
+                                                 refit=True, cv=self.cv_strat_reg, n_jobs=N_JOBS)
             grid_search_reg.fit(X_0, D_0)
             self.tau_0 = grid_search_reg.best_estimator_
         else:
