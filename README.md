@@ -11,4 +11,4 @@ Also, you need to fix the functions.py file in the sksurv library. Just replace 
 
 View [example](Example.ipynb) for the brief info.
 
-The [pytorch_survival script](pytorch_survival.py) contains all numerical experiments, described in the article. To visualize collected data use the [drawing script](survival_drawing_script.py).
+The [pytorch_survival script](pytorch_survival.py) contains all numerical experiments, described in the article. To visualize collected data use the [results merging script](merge_script.py) to merge all the experiments results and then draw the figures using the [drawing script](survival_drawing_script.py).
