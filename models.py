@@ -12,8 +12,6 @@ def sf_to_t(S, T):
     return T[0] + np.sum(integral, axis=-1)
 
 # W and T already sorted
-
-
 @jit(float32[:, ::1](float32[:, ::1], int64[::1]), nopython=True)
 def nw_helper_func(W, D):
     k = W.shape[0]
@@ -30,8 +28,6 @@ def nw_helper_func(W, D):
         weight_sum = np.zeros(k, dtype=np.float32)
         for j in range(i):
             weight_sum += W[:, j]
-            # if weight_sum[j] >= 1:
-            #     weight_sum[j] = 1 - W[j, i]
         cur_S = 1 - W[:, i] / (1 - weight_sum)
         for j in range(k):
             if not np.isfinite(cur_S[j]) or cur_S[j] < 0:
@@ -85,7 +81,6 @@ class MyCox(CoxnetSurvivalAnalysis):
         with warnings.catch_warnings():
             warnings.simplefilter('ignore')
             super().fit(x, y)
-        # print(self.alphas_)
         return self
 
     def predict(self, x):

@@ -26,7 +26,6 @@ def tau_metric(S, T, T_labels):
 
 
 def tau_cate_diff(S_diff, T, T_1, T_0):
-    # assert S_diff.ndim  == T_1.ndim == T_0.ndim == 2
     if T.ndim == 1:
         T_diff = T[None, 1:] - T[None, :-1]
         T_start = T[0]
@@ -119,7 +118,6 @@ def exp_iter(data_dict, do_cv=True, models_params=None):
                                                  T_cnt, T_val, delta_cnt, delta_val, x_cnt.shape[0], m, 1)
     *val_data, val_labels, val_d = arrs_to_torch_dev(*val_data, val_labels, val_d)
     optimizer = torch.optim.AdamW(model.parameters(), 0.001)
-    # optimizer = torch.optim.Adagrad(model.parameters(), 0.01)
     train_model(data_gen, model, tau_loss, optimizer, epochs,
                 (val_data, val_labels, val_d), patience)
     calc_my_model_metrics('Kernel control', 'Kernel treat', 'Kernel CATE',
@@ -246,15 +244,6 @@ def cens_exp(cnt_func, trt_func, t_bnds, censored_list, cnt_size, trt_part, test
             models_params_list.append(new_params)
 
 
-def table_exp(cnt_func, trt_func, t_bnds, censored_part, cnt_size, trt_part, test_size, val_part):
-    global models_params_list
-    data_dict = make_treat_set(cnt_func, trt_func, t_bnds, censored_part,
-                               cnt_size, trt_size, test_size, val_size)
-    new_params = exp_iter(data_dict, do_cv, None if do_cv else models_params_list[0])
-    if do_cv:
-        models_params_list.append(new_params)
-
-
 random_seed = 12345
 test_size = 1000
 cnt_size = 300
@@ -310,14 +299,10 @@ if __name__ == '__main__':
                          trt_part, test_size, val_part, size_list)
                 # part_exp(cnt_func, trt_func, t_bnds, censored_part, cnt_size, trt_list, test_size, val_part)
                 # cens_exp(cnt_func, trt_func, t_bnds, cens_list, cnt_size, trt_part, test_size, val_part)
-                # table_exp(cnt_func, trt_func, t_bnds, censored_part, cnt_size, trt_part, test_size, val_part)
 
             except ArithmeticError:
                 j += 1
                 continue
-
-            # for key, val in res_dict.items():
-            #     print(f'{key}: {np.mean(val)}')
 
             params = {
                 'batch_size': batch_size,

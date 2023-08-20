@@ -22,8 +22,6 @@ class Kernel(Module):
             torch.nn.ReLU6()
         )
         self.sequent = torch.nn.Sequential(
-            # torch.nn.Linear(4 * m, 2 * m),
-            # torch.nn.ReLU(),
             torch.nn.Linear(2 * m, m),
             torch.nn.ReLU6(),
             torch.nn.Linear(m, 2 * s),
@@ -186,7 +184,6 @@ def make_train_set(x, T, delta, n, m, mlp_coef):
 
 
 def train_model(data_generator, model, loss_fn, optimizer, epochs, val_data=None, patience=0):
-    # writer = SummaryWriter('./TB_log/' + time.strftime("%d.%m_%H.%M.%S"))
     start_time = time.time()
     if val_data is not None:
         weights = copy.deepcopy(model.state_dict())
@@ -241,9 +238,6 @@ def train_model(data_generator, model, loss_fn, optimizer, epochs, val_data=None
                 print('Early stopping!')
                 model.load_state_dict(weights)
                 break
-        # writer.add_scalar('Train loss', cur_loss / steps, e)
-        # if val_data is not None:
-        #     writer.add_scalar('Val loss', val_loss, e)
         print('time elapsed: ', round(time.time() - time_stamp, 4), ' sec.')
     print(f'Train is finished, {round(time.time() - start_time, 0)} sec. taken')
 
