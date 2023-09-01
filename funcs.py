@@ -35,7 +35,8 @@ class circle_func(func):
             cur_range = cur_border - last_border
             scale = 2 * np.pi / cur_range
             shift = -last_border
-            t_mask = np.logical_and(last_border < tau, tau < cur_border).astype(np.float32)
+            t_mask = np.logical_and(
+                last_border < tau, tau < cur_border).astype(np.float32)
             X[:, 2 * i] = np.sin((shift + tau) * scale) * t_mask
             X[:, 2 * i + 1] = np.cos((shift + tau) * scale) * t_mask
             last_border = cur_border
@@ -46,13 +47,15 @@ class gauss_func(func):
     def __init__(self, m, t_bnd, b, l, nu) -> None:
         super().__init__(b, l, nu)
         self.m = m
-        self.sigma = (t_bnd[1] - t_bnd[0]) / (6 * m)
+        t_range = t_bnd[1] - t_bnd[0]
+        self.sigma = t_range / (6 * m)
+        self.shift = t_range / (m - 1)
 
     def calc_x(self, tau):
         res = np.empty((tau.shape[0], self.m))
         for i in range(self.m):
             res[:, i] = 1 / (self.sigma * np.sqrt(2 * np.pi)) * \
-                np.exp(- (tau - i) ** 2 / (2 * self.sigma ** 2))
+                np.exp(- (tau - i * self.shift) ** 2 / (2 * self.sigma ** 2))
         return res
 
 

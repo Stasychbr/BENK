@@ -4,23 +4,25 @@ import json
 from collections import defaultdict
 
 NAME_PATTERN = 'spiral_size'
-REG_PATTERN = NAME_PATTERN + r'_\d+\.json'
+NAME_REG_EXPR = NAME_PATTERN + r'_\d+\.json'
+METRIC_REG_EXPR = r'Kernel|metric|PEHE'
 PATH = 'surv_dicts'
 
 if __name__ == '__main__':
-    reg = re.compile(REG_PATTERN)
+    name_reg = re.compile(NAME_REG_EXPR)
+    metric_reg = re.compile(METRIC_REG_EXPR)
     dir = Path(PATH)
     d_merge = defaultdict(list)
-    files_to_proc = filter(lambda d: reg.fullmatch(d.name) is not None, dir.iterdir())
+    files_to_proc = filter(lambda d: name_reg.fullmatch(d.name), dir.iterdir())
     empty_flag = True
     for p_file in files_to_proc:
-        print('Processed', p_file.name)
         empty_flag = False
         with open(str(p_file.absolute()), 'r') as file:
             d = json.load(file)
             for key in d:
-                if 'Kernel' in key or 'metric' in key:
+                if metric_reg.search(key):
                     d_merge[key].append(d[key])
+        print('Processed', p_file.name)
     if empty_flag:
         raise RuntimeError('No files to process!')
     d_merge['params'] = d['params']
